@@ -1,2 +1,0 @@
-# earn
-Watch and earn
