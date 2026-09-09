@@ -458,11 +458,26 @@
     iframe {
       border-radius: 10px;
     }
+
+    .interaction-stats {
+      background: rgba(255, 152, 0, 0.1);
+      border: 1px solid rgba(255, 152, 0, 0.3);
+      padding: 10px;
+      border-radius: 8px;
+      margin: 15px 0;
+      font-size: 13px;
+      text-align: left;
+    }
+
+    .interaction-stats p {
+      margin: 5px 0;
+      color: #ffb84d;
+    }
   </style>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+    import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, arrayUnion } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyB6qQybRVw4nlwGA-Kp8d6kCqOhdqo11Aw",
@@ -484,6 +499,17 @@
     let currentRotation = 0;
     let heartbeatInterval;
     let lastHeartbeatTime = Date.now();
+
+    // ✅ NEW: Watch Session Tracking
+    let currentWatchSession = null;
+    let interactionStats = {
+      clicks: 0,
+      touches: 0,
+      mouseEnters: 0,
+      totalFocusTime: 0,
+      lastInteractionTime: Date.now(),
+      iframeInView: false
+    };
 
     const pinoyUsernames = [
       'MariaSantos', 'juan_dela_cruz', 'RosaMaria23', 'CarlosGutierrez', 'AnaLuisa',
@@ -603,6 +629,26 @@
         heartbeatInterval = null;
       }
     }
+
+    // ✅ NEW: Interaction tracking functions
+    window.trackInteraction = async function(type) {
+      if (!currentWatchSession) return;
+      
+      if (type === 'click') interactionStats.clicks++;
+      if (type === 'touch') interactionStats.touches++;
+      if (type === 'mouseenter') interactionStats.mouseEnters++;
+      
+      interactionStats.lastInteractionTime = Date.now();
+      
+      try {
+        await setDoc(userRef, {
+          lastInteraction: new Date().toISOString(),
+          interactionData: interactionStats
+        }, { merge: true });
+      } catch (err) {
+        console.error("Error tracking interaction:", err);
+      }
+    };
 
     window.addEventListener('blur', async () => {
       if (watching && userRef) {
@@ -761,19 +807,69 @@
       watching = true;
       startHeartbeat();
 
-      await setDoc(userRef, { activityStatus: "active", lastActivityTime: new Date().toISOString() }, { merge: true });
+      // ✅ NEW: Create watch session
+      currentWatchSession = {
+        seriesName: document.getElementById("seriesSelect").options[document.getElementById("seriesSelect").selectedIndex].text,
+        startTime: new Date().toISOString(),
+        pointsEarnedAtStart: minuteCounter / 300
+      };
+
+      interactionStats = {
+        clicks: 0,
+        touches: 0,
+        mouseEnters: 0,
+        totalFocusTime: 0,
+        lastInteractionTime: Date.now(),
+        iframeInView: false
+      };
+
+      await setDoc(userRef, { 
+        activityStatus: "active", 
+        lastActivityTime: new Date().toISOString(),
+        currentWatchSession: currentWatchSession,
+        interactionData: interactionStats
+      }, { merge: true });
 
       document.getElementById("statusBadge").textContent = "🟢 ACTIVE";
       document.getElementById("statusBadge").className = "status-badge status-active";
+
+      // ✅ NEW: Add interaction event listeners to iframe
+      const seriesFrame = document.getElementById("seriesFrame");
+      seriesFrame.addEventListener('click', () => trackInteraction('click'));
+      seriesFrame.addEventListener('touchstart', () => trackInteraction('touch'));
+      seriesFrame.addEventListener('mouseenter', () => trackInteraction('mouseenter'));
 
       if (updateInterval) clearInterval(updateInterval);
       updateInterval = setInterval(async () => {
         if (watching) {
           minuteCounter++;
-          await setDoc(userRef, { minuteCounter, lastActivityTime: new Date().toISOString() }, { merge: true });
+          await setDoc(userRef, { 
+            minuteCounter, 
+            lastActivityTime: new Date().toISOString(),
+            interactionData: interactionStats
+          }, { merge: true });
           updateUI();
+          updateInteractionDisplay();
         }
       }, 60000);
+    };
+
+    // ✅ NEW: Display interaction stats
+    window.updateInteractionDisplay = function() {
+      const statsDiv = document.getElementById("interactionStats");
+      if (statsDiv && currentWatchSession) {
+        const sessionDuration = Math.floor((Date.now() - Date.parse(currentWatchSession.startTime)) / 1000 / 60);
+        const currentPoints = (minuteCounter / 300).toFixed(4);
+        const pointsEarned = currentPoints - currentWatchSession.pointsEarnedAtStart;
+
+        statsDiv.innerHTML = `
+          <p><strong>Series:</strong> ${currentWatchSession.seriesName}</p>
+          <p><strong>Watch Time:</strong> ${sessionDuration} minutes</p>
+          <p><strong>Interactions:</strong> ${interactionStats.clicks} clicks + ${interactionStats.touches} touches</p>
+          <p><strong>Points This Session:</strong> ${pointsEarned.toFixed(4)}</p>
+          <p><strong>Session Status:</strong> 🟢 ACTIVE WATCHING</p>
+        `;
+      }
     };
 
     window.stopWatching = async () => {
@@ -781,14 +877,58 @@
       stopHeartbeat();
       if (updateInterval) clearInterval(updateInterval);
 
+      // ✅ NEW: Save final session data
+      if (currentWatchSession) {
+        const sessionDuration = Math.floor((Date.now() - Date.parse(currentWatchSession.startTime)) / 1000 / 60);
+        const pointsEarned = (minuteCounter / 300) - currentWatchSession.pointsEarnedAtStart;
+        
+        try {
+          await setDoc(userRef, {
+            watchSessions: arrayUnion({
+              series: currentWatchSession.seriesName,
+              startTime: currentWatchSession.startTime,
+              endTime: new Date().toISOString(),
+              durationMinutes: sessionDuration,
+              pointsEarned: pointsEarned,
+              interactions: interactionStats,
+              verificationScore: calculateVerificationScore(sessionDuration, pointsEarned, interactionStats)
+            })
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error saving watch session:", err);
+        }
+
+        currentWatchSession = null;
+      }
+
       await setDoc(userRef, { activityStatus: "inactive" }, { merge: true });
 
       document.getElementById("statusBadge").textContent = "⚫ INACTIVE";
       document.getElementById("statusBadge").className = "status-badge status-inactive";
 
       document.getElementById("seriesFrame").src = "";
+      document.getElementById("interactionStats").innerHTML = "";
       alert("Stopped watching. Status set to Inactive.");
     };
+
+    // ✅ NEW: Calculate verification score (0-100)
+    function calculateVerificationScore(durationMinutes, pointsEarned, stats) {
+      let score = 100;
+      
+      // Expected: 1 point per minute
+      const expectedPoints = durationMinutes * (1/60); // ~0.016 per minute
+      const pointsRatio = pointsEarned / (expectedPoints > 0 ? expectedPoints : 1);
+      
+      if (pointsRatio > 2) score -= 30; // Too many points for time
+      if (pointsRatio < 0.5) score -= 15; // Too few points
+      
+      // Expected: at least 2 interactions per 10 minutes
+      const expectedInteractions = durationMinutes / 5;
+      const totalInteractions = stats.clicks + stats.touches + stats.mouseEnters;
+      if (totalInteractions < expectedInteractions * 0.5) score -= 20; // Too few interactions
+      
+      return Math.max(0, score);
+    }
 
     async function updateUI() {
       const snap = await getDoc(userRef);
@@ -812,11 +952,9 @@
       }
     }
 
-    // ✅ FIXED: Properly check for payment info using userData
     window.claimReward = async (cost) => {
       const pts = minuteCounter / 300;
 
-      // ✅ Check if payment info is set
       if (!userData.payoutMethod || !userData.payoutNumber || !userData.payoutName) {
         alert("❌ Please set up your payout info first!");
         return;
@@ -883,6 +1021,10 @@
     <div style="margin-top:20px;">
       <iframe id="seriesFrame" width="640" height="360" frameborder="0" allowfullscreen></iframe>
     </div>
+
+    <!-- ✅ NEW: Show interaction stats while watching -->
+    <div id="interactionStats" class="interaction-stats"></div>
+
     <button onclick="loadSeries()">Load</button>
     <button onclick="stopWatching()" style="background: linear-gradient(135deg, #e74c3c, #c0392b); color: #fff;">Stop Watching</button>
   </div>
