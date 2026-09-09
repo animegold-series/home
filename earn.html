@@ -1,0 +1,38 @@
+    // ✅ FIXED: Properly check for payment info and refresh userData
+    window.claimReward = async (cost) => {
+      // ✅ Refresh userData from database first
+      try {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          userData = snap.data();
+        }
+      } catch (err) {
+        console.error("Error refreshing user data:", err);
+      }
+
+      const pts = minuteCounter / 300;
+
+      // ✅ Check if payment info is set
+      if (!userData.payoutMethod || !userData.payoutNumber || !userData.payoutName) {
+        alert("❌ Please set up your payout info first!");
+        window.location.href = "payout.html";
+        return;
+      }
+
+      if (pts >= cost) {
+        const newPending = (userData.pendingEarnings || 0) + cost;
+        minuteCounter -= cost * 300;
+        await setDoc(userRef, { minuteCounter, pendingEarnings: newPending }, { merge: true });
+        
+        const displayName = userData.userName || "User";
+        showNotification(`🎉 ${displayName} claimed ₱${cost}!`);
+        
+        alert("✅ ₱" + cost + " added to Pending Earnings for " +
+              displayName + " via " + userData.payoutMethod + "!");
+        
+        // ✅ Refresh UI to show updated data
+        await updateUI();
+      } else {
+        alert("❌ Not enough points yet!");
+      }
+    };
