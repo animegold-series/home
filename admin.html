@@ -13,6 +13,7 @@
     button.points-btn { background:#27ae60; }
     button.password-btn { background:#9b59b6; padding:6px 10px; font-size:12px; }
     button.delete-btn { background:#e74c3c; padding:6px 10px; font-size:12px; }
+    button.verify-btn { background:#f39c12; padding:6px 10px; font-size:12px; }
     button.dashboard-btn { background:#f39c12; color:#fff; font-weight:bold; }
     ul { list-style:none; padding:0; }
     li { background:#333; margin:10px 0; padding:15px; border-radius:5px; text-align:left; }
@@ -44,6 +45,20 @@
     .copy-btn { background:#27ae60; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; color:#fff; font-size:12px; }
     .copy-btn:hover { background:#229954; }
     .warning-text { color:#ff6b6b; font-weight:bold; margin:10px 0; text-align:left; }
+    .tabs { display:flex; gap:10px; margin:20px 0; justify-content:center; flex-wrap:wrap; }
+    .tab-btn { padding:10px 20px; background:#3498db; border:none; border-radius:5px; cursor:pointer; color:#fff; font-weight:bold; }
+    .tab-btn.active { background:#ff9800; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .watch-session { background:#2a2a2a; padding:15px; border-radius:8px; margin:10px 0; text-align:left; border-left:4px solid #ff9800; }
+    .watch-session h4 { color:#ffb84d; margin:0 0 10px 0; }
+    .watch-session p { font-size:12px; margin:5px 0; }
+    .suspicious { border-left-color:#c0392b; background:#2a1a1a; }
+    .verified { border-left-color:#27ae60; background:#1a2a1a; }
+    .fraud-badge { display:inline-block; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold; }
+    .fraud-high { background:#c0392b; color:#fff; }
+    .fraud-medium { background:#f39c12; color:#000; }
+    .fraud-low { background:#27ae60; color:#fff; }
   </style>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
@@ -139,6 +154,7 @@
               <button onclick="unbanUser('${docSnap.id}')">Unban</button>
               <button class="active-btn" onclick="setUserActive('${docSnap.id}')">🟢 Set Active</button>
               <button class="inactive-btn" onclick="setUserInactive('${docSnap.id}')">⚫ Set Inactive</button>
+              <button class="verify-btn" onclick="viewWatchSessions('${docSnap.id}', '${data.userName || 'Unknown'}')">📺 Watch History</button>
               <button class="delete-btn" onclick="openDeleteModal('${docSnap.id}', '${data.userName || 'Unknown'}', '${data.email || 'unknown@email.com'}')">🗑️ Delete</button>
             </div>
           </li>`;
@@ -307,7 +323,6 @@
       }
     };
 
-    // ✅ NEW: Set user to active
     window.setUserActive = async function(uid) {
       try {
         await updateDoc(doc(db, "users", uid), { activityStatus: "active" });
@@ -318,7 +333,6 @@
       }
     };
 
-    // ✅ NEW: Set user to inactive
     window.setUserInactive = async function(uid) {
       try {
         await updateDoc(doc(db, "users", uid), { activityStatus: "inactive" });
@@ -329,7 +343,67 @@
       }
     };
 
-    // ✅ NEW: Open delete confirmation modal
+    // ✅ NEW: View watch sessions for verification
+    window.viewWatchSessions = async function(uid, userName) {
+      try {
+        const userRef = doc(db, "users", uid);
+        const snap = await getDoc(userRef);
+        
+        if (!snap.exists()) {
+          alert("User not found!");
+          return;
+        }
+
+        const userData = snap.data();
+        const watchSessions = userData.watchSessions || [];
+        
+        let sessionsHTML = `<h3>📺 Watch History: ${userName}</h3>`;
+        
+        if (watchSessions.length === 0) {
+          sessionsHTML += `<p style="color:#ff9800;">No watch sessions recorded</p>`;
+        } else {
+          sessionsHTML += `<p>Total Sessions: <strong>${watchSessions.length}</strong></p>`;
+          
+          watchSessions.forEach((session, index) => {
+            const score = session.verificationScore || 0;
+            let fraudClass = 'verified';
+            let fraudBadge = `<span class="fraud-badge fraud-low">✅ VERIFIED (${score}%)</span>`;
+            
+            if (score < 50) {
+              fraudClass = 'suspicious';
+              fraudBadge = `<span class="fraud-badge fraud-high">⚠️ SUSPICIOUS (${score}%)</span>`;
+            } else if (score < 75) {
+              fraudBadge = `<span class="fraud-badge fraud-medium">⚡ CHECK (${score}%)</span>`;
+            }
+            
+            const startTime = new Date(session.startTime).toLocaleString();
+            const interactions = session.interactions || {};
+            
+            sessionsHTML += `
+              <div class="watch-session ${fraudClass}">
+                <h4>${session.series || 'Unknown'} ${fraudBadge}</h4>
+                <p><strong>Date:</strong> ${startTime}</p>
+                <p><strong>Duration:</strong> ${session.durationMinutes} minutes</p>
+                <p><strong>Points Earned:</strong> ${session.pointsEarned.toFixed(4)}</p>
+                <p><strong>Interactions:</strong> ${interactions.clicks || 0} clicks + ${interactions.touches || 0} touches</p>
+                <p><strong>Interaction Ratio:</strong> ${((interactions.clicks + interactions.touches) / Math.max(session.durationMinutes, 1)).toFixed(2)} per minute</p>
+              </div>
+            `;
+          });
+        }
+        
+        document.getElementById("watchSessionsContent").innerHTML = sessionsHTML;
+        document.getElementById("watchSessionsModal").style.display = "flex";
+      } catch (err) {
+        alert("Error loading watch sessions: " + err.message);
+        console.error(err);
+      }
+    };
+
+    window.closeWatchSessionsModal = function() {
+      document.getElementById("watchSessionsModal").style.display = "none";
+    };
+
     window.openDeleteModal = function(uid, userName, email) {
       document.getElementById("deleteUserName").innerText = userName;
       document.getElementById("deleteUserEmail").value = email;
@@ -343,7 +417,6 @@
       document.getElementById("deleteUserEmail").value = "";
     };
 
-    // ✅ NEW: Delete user completely and show email for re-registration
     window.confirmDeleteUser = async function() {
       const uid = document.getElementById("deleteUserId").value;
       const email = document.getElementById("deleteUserEmail").value;
@@ -357,12 +430,10 @@
       try {
         await deleteDoc(doc(db, "users", uid));
         
-        // Show success modal with email for re-registration
         document.getElementById("deleteConfirmModal").style.display = "none";
         document.getElementById("deleteSuccessModal").style.display = "flex";
         document.getElementById("deletedEmailDisplay").innerText = email;
         
-        // Auto-copy email to clipboard
         navigator.clipboard.writeText(email).then(() => {
           console.log("Email copied to clipboard");
         });
@@ -525,6 +596,14 @@
       <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" autocomplete="off">
       <button onclick="saveNewPassword()" style="background:#9b59b6; width:100%;">Change Password</button>
       <button onclick="closePasswordModal()" style="background:#e74c3c; width:100%;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Watch Sessions Modal -->
+  <div id="watchSessionsModal" class="modal">
+    <div class="modal-content" style="width:600px; max-height:80vh; overflow-y:auto;">
+      <div id="watchSessionsContent"></div>
+      <button onclick="closeWatchSessionsModal()" style="background:#3498db; width:100%; margin-top:15px;">Close</button>
     </div>
   </div>
 
