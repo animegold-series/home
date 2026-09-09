@@ -12,6 +12,7 @@
     button.edit-btn { background:#3498db; padding:6px 10px; font-size:12px; }
     button.points-btn { background:#27ae60; }
     button.password-btn { background:#9b59b6; padding:6px 10px; font-size:12px; }
+    button.delete-btn { background:#e74c3c; padding:6px 10px; font-size:12px; }
     button.dashboard-btn { background:#f39c12; color:#fff; font-weight:bold; }
     ul { list-style:none; padding:0; }
     li { background:#333; margin:10px 0; padding:15px; border-radius:5px; text-align:left; }
@@ -43,7 +44,7 @@
   </style>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
-    import { getFirestore, collection, getDocs, updateDoc, doc, getDoc } 
+    import { getFirestore, collection, getDocs, updateDoc, doc, getDoc, deleteDoc } 
       from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut
     } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
@@ -135,6 +136,7 @@
               <button onclick="unbanUser('${docSnap.id}')">Unban</button>
               <button class="active-btn" onclick="setUserActive('${docSnap.id}')">🟢 Set Active</button>
               <button class="inactive-btn" onclick="setUserInactive('${docSnap.id}')">⚫ Set Inactive</button>
+              <button class="delete-btn" onclick="deleteUser('${docSnap.id}', '${data.userName || data.email || 'Unknown'}')">🗑️ Delete</button>
             </div>
           </li>`;
         });
@@ -321,6 +323,24 @@
         loadUsers();
       } catch (err) {
         alert("Error setting user inactive: " + err.message);
+      }
+    };
+
+    // ✅ NEW: Delete user completely
+    window.deleteUser = async function(uid, userName) {
+      const confirmDelete = confirm(`⚠️ WARNING: This will permanently DELETE all data for user "${userName}"!\n\nThis includes:\n- Email\n- Username\n- Password\n- All earnings data\n- All account information\n\nThis action CANNOT be undone!\n\nAre you sure?`);
+
+      if (!confirmDelete) {
+        return;
+      }
+
+      try {
+        await deleteDoc(doc(db, "users", uid));
+        alert(`✅ User "${userName}" and all associated data have been permanently deleted!`);
+        loadUsers();
+      } catch (err) {
+        alert("Error deleting user: " + err.message);
+        console.error(err);
       }
     };
 
