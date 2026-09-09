@@ -1,0 +1,47 @@
+    window.saveNewPassword = async function() {
+      const newPassword = document.getElementById("newPasswordInput").value.trim();
+      const confirmPassword = document.getElementById("confirmPasswordInput").value.trim();
+
+      if (!newPassword || !confirmPassword) {
+        alert("Please fill in both password fields!");
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        alert("Passwords do not match!");
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        alert("Password must be at least 6 characters long!");
+        return;
+      }
+
+      try {
+        // ✅ FIX: Get fresh data before updating
+        const userRef = doc(db, "users", currentEditUserId);
+        const snap = await getDoc(userRef);
+        
+        if (!snap.exists()) {
+          alert("User not found!");
+          return;
+        }
+
+        const userData = snap.data();
+
+        // ✅ Update password
+        await updateDoc(userRef, { password: newPassword });
+
+        alert(`✅ Password changed successfully for ${userData.userName || userData.email}!`);
+        
+        // ✅ FIX: Close modal and reload users with a small delay to ensure DB is updated
+        closePasswordModal();
+        
+        setTimeout(() => {
+          loadUsers();
+        }, 500);
+      } catch (err) {
+        alert("Error changing password: " + err.message);
+        console.error(err);
+      }
+    };
